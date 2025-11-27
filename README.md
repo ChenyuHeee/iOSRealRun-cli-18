@@ -11,6 +11,8 @@
 
 ## 用法简介
 
+[新手教程](https://chenyuheee.github.io/posts/help/)
+
 ### 前置条件
 
 1. 系统是 `Windows` 或 `MacOS`
