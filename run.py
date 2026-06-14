@@ -13,7 +13,8 @@ from geopy.distance import geodesic
 
 from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
 from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
-from pymobiledevice3.services.dvt.dvt_secure_socket_proxy import DvtSecureSocketProxyService
+from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
+
 
 def bd09Towgs84(position):
     wgs_p = {}
@@ -65,14 +66,10 @@ def geodistance(p1, p2):
     return geodesic((p1["lat"],p1["lng"]),(p2["lat"],p2["lng"])).m
 
 def smooth(start, end, i):
-    import math
     i = (i-start)/(end-start)*math.pi
     return math.sin(i)**2
 
 def randLoc(loc: list, d=0.000025, n=5):
-    import random
-    import time
-    import math
     # deepcopy loc
     result = []
     for i in loc:
@@ -137,27 +134,31 @@ def fixLockT(loc: list, v, dt):
             t += dt
     return fixedLoc
 
-def run1(dvt, loc: list, v, dt=0.2):
+async def run1(loc_sim, loc: list, v, dt=0.2):
     fixedLoc = fixLockT(loc, v, dt)
     nList = (5, 6, 7, 8, 9)
     n = nList[random.randint(0, len(nList)-1)]
     fixedLoc = randLoc(fixedLoc, n=n)  # a path will be divided into n parts for random route
-    clock = time.time()
     for i in fixedLoc:
-        LocationSimulation(dvt).set(*bd09Towgs84(i).values())
-        while time.time()-clock < dt:
-            pass
-        clock = time.time()
+        wgs = bd09Towgs84(i)
+        await loc_sim.set(wgs["lat"], wgs["lng"])
+        await asyncio.sleep(dt)
 
-async def run(address, port, loc: list, v, d=15):
+async def run(address, port, loc: list, v, d=15, duration_seconds=None):
     random.seed(time.time())
     rsd = RemoteServiceDiscoveryService((address, port))
     await asyncio.sleep(2)
     await rsd.connect()
-    dvt = DvtSecureSocketProxyService(rsd)
-    dvt.perform_handshake()
 
-    while True:
-        vRand = 1000/(1000/v-(2*random.random()-1)*d)
-        run1(dvt, loc, vRand)
-        print("跑完一圈了")
+    async with DvtProvider(rsd) as dvt:
+        async with LocationSimulation(dvt) as loc_sim:
+            async def _loop():
+                while True:
+                    vRand = 1000 / (1000 / v - (2 * random.random() - 1) * d)
+                    await run1(loc_sim, loc, vRand)
+                    print("跑完一圈了")
+
+            if duration_seconds:
+                await asyncio.wait_for(_loop(), timeout=duration_seconds)
+            else:
+                await _loop()
